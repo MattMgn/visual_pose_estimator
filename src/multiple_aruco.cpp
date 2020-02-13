@@ -14,6 +14,7 @@
  *
  *  Description: Script to estimate pose from a multiple aruco markers with known size and pose,
  *  inspired from: https://docs.opencv.org/trunk/d5/dae/tutorial_aruco_detection.html
+ *  export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/foxbot/repo/opencv/opencv-3.3.1/release/lib
  *  Author: Matthieu Magnon
  *  Libraries: opencv3
  *
@@ -98,25 +99,26 @@ void imageCallback(const sensor_msgs::Image& msg)
     cv::aruco::detectMarkers(cv_ptr->image, dictionary, corners, ids);
 
     // if at least one marker detected
-    if (ids.size() == 0)
-        return;
+    if (ids.size() != 0) {
 
-    std::vector<cv::Vec3d> rvecs, tvecs;
+        std::vector<cv::Vec3d> rvecs, tvecs;
 
-    ROS_INFO("%i arucos detected", (int)ids.size());
+        ROS_INFO("%i arucos detected", (int)ids.size());
 
-    cv::aruco::estimatePoseSingleMarkers(corners, 0.05, cameraMatrix, distCoeffs, rvecs, tvecs);
-        // draw axis for each marker
-        for(int i=0; i<ids.size(); i++) {
-            auto rvec = rvecs[i];
-            auto tvec = tvecs[i];
-            auto corner = corners[i];
-            ROS_INFO(" *** aruco %i *** ", (int)ids[i]);
-            auto c1 = corner[0];
-            ROS_INFO("corner1 XY [pixel] = [%f %f]", c1.x, c1.y);
-            ROS_INFO("pos XYZ = [%f, %f, %f], att = [%f, %f, %f]", tvec[0], tvec[1], tvec[2], rvec[0], rvec[1], rvec[2]);
-            cv::aruco::drawAxis(cv_ptr->image, cameraMatrix, distCoeffs, rvecs[i], tvecs[i], 0.1);
-        }
+        cv::aruco::estimatePoseSingleMarkers(corners, 0.05, cameraMatrix, distCoeffs, rvecs, tvecs);
+            // draw axis for each marker
+            for(int i=0; i<ids.size(); i++) {
+                auto rvec = rvecs[i];
+                auto tvec = tvecs[i];
+                auto corner = corners[i];
+                ROS_INFO(" *** aruco %i *** ", (int)ids[i]);
+                auto c1 = corner[0];
+                ROS_INFO("corner1 XY [pixel] = [%f %f]", c1.x, c1.y);
+                ROS_INFO("pos XYZ = [%f, %f, %f], att = [%f, %f, %f]", tvec[0], tvec[1], tvec[2], rvec[0], rvec[1], rvec[2]);
+                cv::aruco::drawAxis(cv_ptr->image, cameraMatrix, distCoeffs, rvecs[i], tvecs[i], 0.1);
+            }
+
+    }
 
     // Update GUI Window
     cv::imshow(OPENCV_WINDOW, cv_ptr->image);

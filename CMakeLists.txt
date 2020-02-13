@@ -12,12 +12,31 @@ catkin_package()
 add_executable(single_aruco src/single_aruco.cpp)
 add_executable(multiple_aruco src/multiple_aruco.cpp)
 
-find_package(OpenCV REQUIRED)
-include_directories(include ${catkin_INCLUDE_DIRS})
-target_link_libraries(single_aruco ${catkin_LIBRARIES})
-target_link_libraries(multiple_aruco ${catkin_LIBRARIES})
+find_package(OpenCV 3.2 REQUIRED)
 
-find_package(OpenCV)
-include_directories(${OpenCV_INCLUDE_DIRS})
-target_link_libraries(single_aruco ${OpenCV_LIBRARIES})
-target_link_libraries(multiple_aruco ${OpenCV_LIBRARIES})
+set(OpenCV_INCLUDE_DIRS
+	/home/foxbot/repo/opencv/opencv-3.3.1/include/opencv
+	/home/foxbot/repo/opencv/opencv-3.3.1/include/opencv2
+)
+
+set(OpenCV_LIBRARIES
+  opencv_core
+  opencv_highgui
+  opencv_imgcodecs
+  opencv_aruco
+)
+
+message(STATUS "OpenCV_INCLUDE_DIRS = ${OpenCV_INCLUDE_DIRS}")
+message(STATUS "OpenCV_LIBS = ${OpenCV_LIBS}")
+
+include_directories(include
+	${catkin_INCLUDE_DIRS}
+	${OpenCV_INCLUDE_DIRS})
+target_link_libraries(
+	single_aruco
+	${catkin_LIBRARIES}
+	${OpenCV_LIBRARIES})
+target_link_libraries(
+	multiple_aruco
+	${catkin_LIBRARIES}
+	${OpenCV_LIBRARIES})
