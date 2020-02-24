@@ -23,6 +23,9 @@
 #include <sensor_msgs/Image.h>
 #include <sensor_msgs/CameraInfo.h>
 #include <cv_bridge/cv_bridge.h>
+#include <geometry_msgs/Pose.h>
+#include <tf/LinearMath/Quaternion.h>
+#include <tf/LinearMath/Matrix3x3.h>
 
 #include "opencv2/core/core.hpp"
 #include <opencv2/highgui/highgui.hpp>
@@ -43,6 +46,9 @@ cv::Mat cameraMatrix;
 std::vector<float> distCoeffs;
 
 cv::Ptr<cv::aruco::Dictionary> dictionary = cv::aruco::getPredefinedDictionary(cv::aruco::DICT_4X4_50);
+
+geometry_msgs::Pose *ar1_pose = new geometry_msgs::Pose;
+geometry_msgs::Pose *ar2_pose = new geometry_msgs::Pose;
 
 void imageCallback(const sensor_msgs::Image& msg);
 
@@ -72,6 +78,23 @@ int main(int argc, char** argv)
 
     for (int i = 0; i < 5; i++)
         distCoeffs.push_back(D[i]);
+
+    /* Define aruco pose in world frame */
+    ar1_pose->position.x = 0.0;
+    ar1_pose->position.y = 0.0;
+    ar1_pose->position.z = 0.1;
+    ar1_pose->orientation.w = 1.0;
+    ar1_pose->orientation.x = 0.0;
+    ar1_pose->orientation.y = 0.0;
+    ar1_pose->orientation.z = 0.0;
+
+    ar2_pose->position.x = 0.0;
+    ar2_pose->position.y = 0.2;
+    ar2_pose->position.z = 0.1;
+    ar2_pose->orientation.w = 1.0;
+    ar2_pose->orientation.x = 0.0;
+    ar2_pose->orientation.y = 0.0;
+    ar2_pose->orientation.z = 0.0;
 
     ros::Subscriber img_rect_sub = nh.subscribe("/csi_cam_0/image_raw", 10, imageCallback);
 
@@ -106,19 +129,45 @@ void imageCallback(const sensor_msgs::Image& msg)
         ROS_INFO("%i arucos detected", (int)ids.size());
 
         cv::aruco::estimatePoseSingleMarkers(corners, 0.05, cameraMatrix, distCoeffs, rvecs, tvecs);
-            // draw axis for each marker
-            for(int i=0; i<ids.size(); i++) {
-                auto rvec = rvecs[i];
-                auto tvec = tvecs[i];
-                auto corner = corners[i];
-                ROS_INFO(" *** aruco %i *** ", (int)ids[i]);
-                auto c1 = corner[0];
-                ROS_INFO("corner1 XY [pixel] = [%f %f]", c1.x, c1.y);
-                ROS_INFO("pos XYZ = [%f, %f, %f], att = [%f, %f, %f]", tvec[0], tvec[1], tvec[2], rvec[0], rvec[1], rvec[2]);
-                cv::aruco::drawAxis(cv_ptr->image, cameraMatrix, distCoeffs, rvecs[i], tvecs[i], 0.1);
-            }
+
+        // draw axis for each marker
+        for(int i=0; i<ids.size(); i++) {
+            auto rvec = rvecs[i];
+            auto tvec = tvecs[i];
+            auto corner = corners[i];
+            ROS_INFO(" *** aruco %i *** ", (int)ids[i]);
+            auto c1 = corner[0];
+            ROS_INFO("corner1 XY [pixel] = [%f %f]", c1.x, c1.y);
+
+            ROS_INFO("pos XYZ = [%f, %f, %f], att = [%f, %f, %f]", tvec[0], tvec[1], tvec[2], rvec[0], rvec[1], rvec[2]);
+            cv::aruco::drawAxis(cv_ptr->image, cameraMatrix, distCoeffs, rvecs[i], tvecs[i], 0.1);
+        }
+
+        // Convert Rvec and tvec to pose
+        for (int i = 0; i < ids.size(); i++) {
+            auto rvec = rvecs[i];
+            auto tvec = tvecs[i];
+
+            // rvec is the Rodrigue vector, describing the rotation from the camera frame to the marker frame
+            // then tvec is the rotationnal vector
+
+            double theta = sqrt(rvec[0] * rvec[0] + rvec[1] * rvec[1] + rvec[2] * rvec[2]);
+            ROS_INFO("theta = %f", theta * 57.0);
+
+            double qw, qx, qy, qz;
+            tf::Quaternion q(cos(theta / 2.0), rvec[0] * sin(theta / 2.0), rvec[1] * sin(theta / 2.0), rvec[2] * sin(theta / 2.0));
+            q.normalize();
+
+            tf::Matrix3x3 m(q);
+            double roll, pitch, yaw;
+            m.getRPY(roll, pitch, yaw);
+
+            ROS_INFO("RPY = [%f, %f, %f] deg", roll * 57.0, pitch * 57.0, yaw * 57.0);
+            ROS_INFO("XYZ = [%f, %f, %f] mm", tvec[0] * 1000.0, tvec[1] * 1000.0, tvec[2] * 1000.0);
+        }
 
     }
+
 
     // Update GUI Window
     cv::imshow(OPENCV_WINDOW, cv_ptr->image);

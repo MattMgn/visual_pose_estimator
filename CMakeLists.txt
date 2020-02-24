@@ -4,7 +4,7 @@ project(visual_pose_estimator)
 ## Compile as C++11, supported in ROS Kinetic and newer
 # add_compile_options(-std=c++11)
 ## Find catkin and any catkin packages
-find_package(catkin REQUIRED COMPONENTS roscpp sensor_msgs cv_bridge)
+find_package(catkin REQUIRED COMPONENTS roscpp sensor_msgs cv_bridge tf)
 
 ## Declare a catkin package
 catkin_package()
