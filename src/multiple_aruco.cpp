@@ -26,8 +26,10 @@
 #include <geometry_msgs/Pose.h>
 #include <tf/LinearMath/Quaternion.h>
 #include <tf/LinearMath/Matrix3x3.h>
+#include <tf/transform_broadcaster.h>
 
 #include "opencv2/core/core.hpp"
+#include <opencv2/calib3d.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/aruco.hpp>
@@ -35,6 +37,10 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <iostream>
+
+
+#define HOMOGNENEOUS_COORD_NB   4
+
 
 static const std::string OPENCV_WINDOW = "Image window";
 
@@ -50,6 +56,12 @@ cv::Ptr<cv::aruco::Dictionary> dictionary = cv::aruco::getPredefinedDictionary(c
 geometry_msgs::Pose *ar1_pose = new geometry_msgs::Pose;
 geometry_msgs::Pose *ar2_pose = new geometry_msgs::Pose;
 
+geometry_msgs::TransformStamped cam_pose;
+tf::TransformBroadcaster * cam_broadcaster;
+
+double arucoId0Coord[HOMOGNENEOUS_COORD_NB] = {0.0, 0.0, 0.1, 1.0};
+double arucoId1Coord[HOMOGNENEOUS_COORD_NB] = {0.1, 0.0, 0.1, 1.0};
+
 void imageCallback(const sensor_msgs::Image& msg);
 
 int main(int argc, char** argv)
@@ -57,6 +69,8 @@ int main(int argc, char** argv)
     ros::init(argc, argv, "single_aruco");
 
     ros::NodeHandle nh;
+
+    cam_broadcaster = new tf::TransformBroadcaster();
 
     ROS_INFO("Visual pose estimator node launched");
 
@@ -79,6 +93,7 @@ int main(int argc, char** argv)
     for (int i = 0; i < 5; i++)
         distCoeffs.push_back(D[i]);
 
+    //TODO: get poses once from topic tf static
     /* Define aruco pose in world frame */
     ar1_pose->position.x = 0.0;
     ar1_pose->position.y = 0.0;
@@ -148,26 +163,57 @@ void imageCallback(const sensor_msgs::Image& msg)
             auto rvec = rvecs[i];
             auto tvec = tvecs[i];
 
-            // rvec is the Rodrigue vector, describing the rotation from the camera frame to the marker frame
-            // then tvec is the rotationnal vector
-
+            /*
             double theta = sqrt(rvec[0] * rvec[0] + rvec[1] * rvec[1] + rvec[2] * rvec[2]);
-            ROS_INFO("theta = %f", theta * 57.0);
-
-            double qw, qx, qy, qz;
             tf::Quaternion q(cos(theta / 2.0), rvec[0] * sin(theta / 2.0), rvec[1] * sin(theta / 2.0), rvec[2] * sin(theta / 2.0));
             q.normalize();
-
             tf::Matrix3x3 m(q);
             double roll, pitch, yaw;
             m.getRPY(roll, pitch, yaw);
+            */
 
-            ROS_INFO("RPY = [%f, %f, %f] deg", roll * 57.0, pitch * 57.0, yaw * 57.0);
-            ROS_INFO("XYZ = [%f, %f, %f] mm", tvec[0] * 1000.0, tvec[1] * 1000.0, tvec[2] * 1000.0);
+            /* Compute extrinsic parameter matrix for homogeneous coordinates, corresponding to the transformation
+             * from marker coordinates to the camera coordinates.
+             * The marker corrdinate system is centered on the middle of the marker, with the Z axis perpendicular
+             * to the marker plane */
+            cv::Mat rotationMatrix(3, 3, CV_64F), extrinsicMatrix(3, 4, CV_64F); //Init.
+            cv::Rodrigues(rvec, rotationMatrix);
+            cv::hconcat(rotationMatrix, tvec, extrinsicMatrix);
+
+            /* Compute marker coordinates expressed */
+            cv::Mat arucoCoordVector(4, 1, CV_64F, arucoCoord);
+            double arucoCoord[4] = {0.0, 0.0, 0.0, 0.0};
+            switch ((int)ids[i]) {
+                case 0:
+                    std::copy(std::begin(arucoId0Coord), std::end(arucoId0Coord), std::begin(arucoCoord));
+                    break;
+                case 1:
+                    std::copy(std::begin(arucoId1Coord), std::end(arucoId1Coord), std::begin(arucoCoord));
+                    break;
+                default:
+                    ROS_INFO("Unknown pose for Aruco ID %i", (int)ids[i]); 
+            }
+            
+
+
+            std::cout << "extrinsicMatrix" << std::endl;
+            std::cout << extrinsicMatrix << std::endl;
+            std::cout << "arucoCoordVector" << std::endl;
+            std::cout << arucoCoordVector << std::endl;
+            std::cout << extrinsicMatrix*arucoCoordVector << std::endl;
         }
 
-    }
+        cam_pose.header.stamp = ros::Time::now();
+        cam_pose.header.frame_id = "world";
+        cam_pose.child_frame_id = "camera_frame";
+        cam_pose.transform.translation.x = 0.0;
+        cam_pose.transform.translation.y = 0.0;
+        cam_pose.transform.translation.z = 0.0;
+        //cam_pose.transform.rotation = q;
 
+        cam_broadcaster->sendTransform(cam_pose);
+
+    }
 
     // Update GUI Window
     cv::imshow(OPENCV_WINDOW, cv_ptr->image);

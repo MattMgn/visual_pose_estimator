@@ -24,6 +24,7 @@ set(OpenCV_LIBRARIES
   opencv_highgui
   opencv_imgcodecs
   opencv_aruco
+  opencv_calib3d
 )
 
 message(STATUS "OpenCV_INCLUDE_DIRS = ${OpenCV_INCLUDE_DIRS}")
