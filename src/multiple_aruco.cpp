@@ -41,11 +41,6 @@
 
 #define HOMOGNENEOUS_COORD_NB   4
 
-
-static const std::string OPENCV_WINDOW = "Image window";
-
-
-// camera matrix and disto coeff must be determined
 // cameraMatrix = [fx, 0, cx; 0, fy, cy; 0, 0, 1]
 cv::Mat cameraMatrix;
 // distCoeffsTable = [k1, k2, p1, p2 [, k3 [, k4, k5, k6]]]
@@ -181,8 +176,8 @@ void imageCallback(const sensor_msgs::Image& msg)
             cv::hconcat(rotationMatrix, tvec, extrinsicMatrix);
 
             /* Compute marker coordinates expressed */
-            cv::Mat arucoCoordVector(4, 1, CV_64F, arucoCoord);
             double arucoCoord[4] = {0.0, 0.0, 0.0, 0.0};
+            cv::Mat arucoCoordVector(4, 1, CV_64F, arucoCoord);
             switch ((int)ids[i]) {
                 case 0:
                     std::copy(std::begin(arucoId0Coord), std::end(arucoId0Coord), std::begin(arucoCoord));
@@ -193,8 +188,6 @@ void imageCallback(const sensor_msgs::Image& msg)
                 default:
                     ROS_INFO("Unknown pose for Aruco ID %i", (int)ids[i]); 
             }
-            
-
 
             std::cout << "extrinsicMatrix" << std::endl;
             std::cout << extrinsicMatrix << std::endl;
@@ -216,7 +209,7 @@ void imageCallback(const sensor_msgs::Image& msg)
     }
 
     // Update GUI Window
-    cv::imshow(OPENCV_WINDOW, cv_ptr->image);
+    cv::imshow("viewer", cv_ptr->image);
     cv::waitKey(3);
     
     return;
