@@ -27,6 +27,7 @@
 #include <tf/LinearMath/Quaternion.h>
 #include <tf/LinearMath/Matrix3x3.h>
 #include <tf/transform_broadcaster.h>
+#include <tf/transform_listener.h>
 
 #include "opencv2/core/core.hpp"
 #include <opencv2/calib3d.hpp>
@@ -38,8 +39,8 @@
 #include <stdio.h>
 #include <iostream>
 
-
-#define HOMOGNENEOUS_COORD_NB   4
+#define DEBUG
+#define HOMOGENEOUS_COORD_NB   4
 
 // cameraMatrix = [fx, 0, cx; 0, fy, cy; 0, 0, 1]
 cv::Mat cameraMatrix;
@@ -48,26 +49,25 @@ std::vector<float> distCoeffs;
 
 cv::Ptr<cv::aruco::Dictionary> dictionary = cv::aruco::getPredefinedDictionary(cv::aruco::DICT_4X4_50);
 
+geometry_msgs::Pose *ar0_pose = new geometry_msgs::Pose;
 geometry_msgs::Pose *ar1_pose = new geometry_msgs::Pose;
-geometry_msgs::Pose *ar2_pose = new geometry_msgs::Pose;
 
 geometry_msgs::TransformStamped cam_pose;
+//tf::TransformListener * arucos_listener;
 tf::TransformBroadcaster * cam_broadcaster;
 
-double arucoId0Coord[HOMOGNENEOUS_COORD_NB] = {0.0, 0.0, 0.1, 1.0};
-double arucoId1Coord[HOMOGNENEOUS_COORD_NB] = {0.1, 0.0, 0.1, 1.0};
+double arucoId0Coord[HOMOGENEOUS_COORD_NB] = {0.0, 0.0, 0.1, 1.0};
+double arucoId1Coord[HOMOGENEOUS_COORD_NB] = {0.1, 0.0, 0.1, 1.0};
 
 void imageCallback(const sensor_msgs::Image& msg);
 
 int main(int argc, char** argv)
 {
     ros::init(argc, argv, "single_aruco");
-
     ros::NodeHandle nh;
+    ROS_INFO("Visual pose estimator node launched");
 
     cam_broadcaster = new tf::TransformBroadcaster();
-
-    ROS_INFO("Visual pose estimator node launched");
 
     // Get camera matrix
     ros::Duration timeout(10, 0); // 10sec
@@ -88,23 +88,23 @@ int main(int argc, char** argv)
     for (int i = 0; i < 5; i++)
         distCoeffs.push_back(D[i]);
 
-    //TODO: get poses once from topic tf static
-    /* Define aruco pose in world frame */
-    ar1_pose->position.x = 0.0;
-    ar1_pose->position.y = 0.0;
-    ar1_pose->position.z = 0.1;
-    ar1_pose->orientation.w = 1.0;
-    ar1_pose->orientation.x = 0.0;
-    ar1_pose->orientation.y = 0.0;
-    ar1_pose->orientation.z = 0.0;
-
-    ar2_pose->position.x = 0.0;
-    ar2_pose->position.y = 0.2;
-    ar2_pose->position.z = 0.1;
-    ar2_pose->orientation.w = 1.0;
-    ar2_pose->orientation.x = 0.0;
-    ar2_pose->orientation.y = 0.0;
-    ar2_pose->orientation.z = 0.0;
+    /* Get aruco pose in world frame */
+    // aruco_id0
+    tf::TransformListener arucos_listener;
+    tf::StampedTransform transform;
+    arucos_listener.waitForTransform("world", "aruco_id0", ros::Time(0), ros::Duration(3.0));
+    arucos_listener.lookupTransform("world", "aruco_id0", ros::Time(0), transform);
+    ar0_pose->position.x = (float)transform.getOrigin().x();
+    ar0_pose->position.y = (float)transform.getOrigin().y();
+    ar0_pose->position.z = (float)transform.getOrigin().z();
+    tf::quaternionTFToMsg(transform.getRotation(), ar0_pose->orientation);
+    // aruco_id1
+    arucos_listener.waitForTransform("world", "aruco_id1", ros::Time(0), ros::Duration(3.0));
+    arucos_listener.lookupTransform("world", "aruco_id1", ros::Time(0), transform);
+    ar1_pose->position.x = (float)transform.getOrigin().x();
+    ar1_pose->position.y = (float)transform.getOrigin().y();
+    ar1_pose->position.z = (float)transform.getOrigin().z();
+    tf::quaternionTFToMsg(transform.getRotation(), ar1_pose->orientation);
 
     ros::Subscriber img_rect_sub = nh.subscribe("/csi_cam_0/image_raw", 10, imageCallback);
 
@@ -114,6 +114,8 @@ int main(int argc, char** argv)
 void imageCallback(const sensor_msgs::Image& msg)
 {
     cv_bridge::CvImagePtr cv_ptr;
+    std::vector<std::vector<cv::Point2f>> corners;
+    std::vector<int> ids;
 
     try {
         cv_ptr = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::BGR8);
@@ -122,95 +124,85 @@ void imageCallback(const sensor_msgs::Image& msg)
         return;
     }
 
-    // Draw an example circle on the video stream
-    if (cv_ptr->image.rows > 60 && cv_ptr->image.cols > 60)
-        cv::circle(cv_ptr->image, cv::Point(50, 50), 10, CV_RGB(255,0,0));
-
-    // Detect arucos
-    std::vector<std::vector<cv::Point2f> > corners;
-    std::vector<int> ids;
+    /* Detect arucos markers */
     cv::aruco::detectMarkers(cv_ptr->image, dictionary, corners, ids);
 
-    // if at least one marker detected
     if (ids.size() != 0) {
-
         std::vector<cv::Vec3d> rvecs, tvecs;
 
-        ROS_INFO("%i arucos detected", (int)ids.size());
-
+        /* Estimate aruco pose with respect to the camera */
         cv::aruco::estimatePoseSingleMarkers(corners, 0.05, cameraMatrix, distCoeffs, rvecs, tvecs);
 
-        // draw axis for each marker
-        for(int i=0; i<ids.size(); i++) {
+        /* Draw triedra */
+        for(int i = 0; i < ids.size(); i++) {
             auto rvec = rvecs[i];
             auto tvec = tvecs[i];
             auto corner = corners[i];
-            ROS_INFO(" *** aruco %i *** ", (int)ids[i]);
-            auto c1 = corner[0];
-            ROS_INFO("corner1 XY [pixel] = [%f %f]", c1.x, c1.y);
-
-            ROS_INFO("pos XYZ = [%f, %f, %f], att = [%f, %f, %f]", tvec[0], tvec[1], tvec[2], rvec[0], rvec[1], rvec[2]);
             cv::aruco::drawAxis(cv_ptr->image, cameraMatrix, distCoeffs, rvecs[i], tvecs[i], 0.1);
         }
 
-        // Convert Rvec and tvec to pose
         for (int i = 0; i < ids.size(); i++) {
             auto rvec = rvecs[i];
             auto tvec = tvecs[i];
-
-            /*
-            double theta = sqrt(rvec[0] * rvec[0] + rvec[1] * rvec[1] + rvec[2] * rvec[2]);
-            tf::Quaternion q(cos(theta / 2.0), rvec[0] * sin(theta / 2.0), rvec[1] * sin(theta / 2.0), rvec[2] * sin(theta / 2.0));
-            q.normalize();
-            tf::Matrix3x3 m(q);
-            double roll, pitch, yaw;
-            m.getRPY(roll, pitch, yaw);
-            */
 
             /* Compute extrinsic parameter matrix for homogeneous coordinates, corresponding to the transformation
              * from marker coordinates to the camera coordinates.
              * The marker corrdinate system is centered on the middle of the marker, with the Z axis perpendicular
              * to the marker plane */
-            cv::Mat rotationMatrix(3, 3, CV_64F), extrinsicMatrix(3, 4, CV_64F); //Init.
+            cv::Mat rotationMatrix(3, 3, CV_64F), extrinsicMatrix(3, 4, CV_64F);
             cv::Rodrigues(rvec, rotationMatrix);
             cv::hconcat(rotationMatrix, tvec, extrinsicMatrix);
 
             /* Compute marker coordinates expressed */
-            double arucoCoord[4] = {0.0, 0.0, 0.0, 0.0};
-            cv::Mat arucoCoordVector(4, 1, CV_64F, arucoCoord);
+            double arucoCoord[4] = {0.0};
+            arucoCoord[3] = 1.0;
             switch ((int)ids[i]) {
                 case 0:
-                    std::copy(std::begin(arucoId0Coord), std::end(arucoId0Coord), std::begin(arucoCoord));
+                    arucoCoord[0] = (double)ar0_pose->position.x; arucoCoord[1] = (double)ar0_pose->position.y; arucoCoord[2] = (double)ar0_pose->position.z;
                     break;
                 case 1:
-                    std::copy(std::begin(arucoId1Coord), std::end(arucoId1Coord), std::begin(arucoCoord));
+                    arucoCoord[0] = ar1_pose->position.x; arucoCoord[1] = ar1_pose->position.y; arucoCoord[2] = ar1_pose->position.z;
                     break;
                 default:
                     ROS_INFO("Unknown pose for Aruco ID %i", (int)ids[i]); 
             }
+            cv::Mat arucoCoordVector(4, 1, CV_64F, arucoCoord);
+            cv::Mat arucoCoordVectorWorldFrame(4, 1, CV_64F);
+            arucoCoordVectorWorldFrame = extrinsicMatrix*arucoCoordVector;
 
+#ifdef DEBUG
+            std::cout << "***** ID " << (int)ids[i] << " *****" << std::endl;
             std::cout << "extrinsicMatrix" << std::endl;
             std::cout << extrinsicMatrix << std::endl;
             std::cout << "arucoCoordVector" << std::endl;
             std::cout << arucoCoordVector << std::endl;
-            std::cout << extrinsicMatrix*arucoCoordVector << std::endl;
+            std::cout << "arucoCoordVectorWorldFrame" << std::endl;
+            std::cout << arucoCoordVectorWorldFrame << std::endl;
+#endif
+
+            /* Compute quaternion from Rodrigue vector */
+            double theta = sqrt(rvec[0] * rvec[0] + rvec[1] * rvec[1] + rvec[2] * rvec[2]);
+            tf::Quaternion q(cos(theta / 2.0), rvec[0] * sin(theta / 2.0), rvec[1] * sin(theta / 2.0), rvec[2] * sin(theta / 2.0));
+            q.normalize();
+
+            cam_pose.header.stamp = ros::Time::now();
+            cam_pose.header.frame_id = "world";
+            cam_pose.child_frame_id = "camera_frame";
+            cam_pose.transform.translation.x = arucoCoordVectorWorldFrame.at<double>(0,0);
+            cam_pose.transform.translation.y = arucoCoordVectorWorldFrame.at<double>(1,0);
+            cam_pose.transform.translation.z = arucoCoordVectorWorldFrame.at<double>(2,0);
+            tf::quaternionTFToMsg(q, cam_pose.transform.rotation);
         }
 
-        cam_pose.header.stamp = ros::Time::now();
-        cam_pose.header.frame_id = "world";
-        cam_pose.child_frame_id = "camera_frame";
-        cam_pose.transform.translation.x = 0.0;
-        cam_pose.transform.translation.y = 0.0;
-        cam_pose.transform.translation.z = 0.0;
-        //cam_pose.transform.rotation = q;
-
+        /* TODO: add filtering between multiples arucos */
         cam_broadcaster->sendTransform(cam_pose);
 
     }
 
-    // Update GUI Window
+#ifdef DEBUG
     cv::imshow("viewer", cv_ptr->image);
     cv::waitKey(3);
-    
+#endif
+
     return;
 }
