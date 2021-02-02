@@ -1,10 +1,7 @@
 <launch>
-    <node pkg="tf" type="static_transform_publisher" name="world_to_map_broadcaster" args="0.0 -0.1 0.1 0.0 0.0 0.0 world aruco_id0 1000" />
-    <node pkg="tf" type="static_transform_publisher" name="base_to_laser_broadcaster" args="0.0 0.1 0.1 0.0 0.0 0.0 world aruco_id1 1000" />
+    <node pkg="tf" type="static_transform_publisher" name="ar0_broadcaster" args="0.0 -0.1 0.15 0.0 0.0 0.0 odom aruco_id0 10" />
+    <node pkg="tf" type="static_transform_publisher" name="ar1_broadcaster" args="0.0 0.1 0.15 0.0 0.0 0.0 odom aruco_id1 10" />
 
-    <node pkg="rviz" type="rviz" name="rviz" required="true"
-      args="-d $(find visual_pose_estimator)/config/poses.rviz" />
-
-
+<!--    <node pkg="rviz" type="rviz" name="rviz" required="true" args="-d $(find visual_pose_estimator)/config/poses.rviz" /> -->
 
 </launch>

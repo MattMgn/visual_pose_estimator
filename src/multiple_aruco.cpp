@@ -42,6 +42,12 @@
 #define DEBUG
 #define HOMOGENEOUS_COORD_NB   4
 
+#define EXTRINSIC_FROM_TOPIC
+
+#define CAMERA_NAME "/camera/rgb"
+//#define CAMERA_NAME "/csi_cam_0"
+
+
 // cameraMatrix = [fx, 0, cx; 0, fy, cy; 0, 0, 1]
 cv::Mat cameraMatrix;
 // distCoeffsTable = [k1, k2, p1, p2 [, k3 [, k4, k5, k6]]]
@@ -63,50 +69,68 @@ void imageCallback(const sensor_msgs::Image& msg);
 
 int main(int argc, char** argv)
 {
-    ros::init(argc, argv, "single_aruco");
+    ros::init(argc, argv, "multiple_aruco");
     ros::NodeHandle nh;
     ROS_INFO("Visual pose estimator node launched");
 
     cam_broadcaster = new tf::TransformBroadcaster();
 
-    // Get camera matrix
+    /* Get camera matrix parameters */
+
+#ifdef EXTRINSIC_FROM_TOPIC
     ros::Duration timeout(10, 0); // 10sec
-    sensor_msgs::CameraInfoConstPtr cam_msg = ros::topic::waitForMessage<sensor_msgs::CameraInfo>("/csi_cam_0/camera_info", nh, timeout);
+    std::string camera_info_str = CAMERA_NAME + std::string("/camera_info");
+    sensor_msgs::CameraInfoConstPtr cam_msg = ros::topic::waitForMessage<sensor_msgs::CameraInfo>(camera_info_str, nh, timeout);
+    //sensor_msgs::CameraInfoConstPtr cam_msg = ros::topic::waitForMessage<sensor_msgs::CameraInfo>("/csi_cam_0/camera_info", nh, timeout);
+
     double P[3][3] = {{cam_msg->P[0], cam_msg->P[1], cam_msg->P[2]},
                       {cam_msg->P[4], cam_msg->P[5], cam_msg->P[6]},
                       {cam_msg->P[8], cam_msg->P[9], cam_msg->P[10]}};
     cameraMatrix = cv::Mat(3, 3,  CV_64F, P);
+    double D[5] = {cam_msg->D[0], cam_msg->D[1], cam_msg->D[2], cam_msg->D[3], cam_msg->D[4]};
+    for (int i = 0; i < 5; i++)
+        distCoeffs.push_back(D[i]);
+#else
+    // hardcoded way
+    double P[3][3] = {{1340.368408, 0.000000, 655.600605},
+                      {0.000000, 1338.741943, 337.300296},
+                      {0.000000, 0.000000, 1.000000}};
+    cameraMatrix = cv::Mat(3, 3,  CV_64F, P);
+    double D[5] = {0.169290, -0.241683, -0.006518, 0.003605, 0.000000};
+    for (int i = 0; i < 5; i++)
+        distCoeffs.push_back(D[i]);
+
+#endif
+
     ROS_INFO("Camera matrix : ");
     ROS_INFO("[%f, %f, %f]", cam_msg->P[0], cam_msg->P[1], cam_msg->P[2]);
     ROS_INFO("[%f, %f, %f]", cam_msg->P[4], cam_msg->P[5], cam_msg->P[6]);
     ROS_INFO("[%f, %f, %f]", cam_msg->P[8], cam_msg->P[9], cam_msg->P[10]);
 
-    double D[5] = {cam_msg->D[0], cam_msg->D[1], cam_msg->D[2], cam_msg->D[3], cam_msg->D[4]};
     ROS_INFO("Distorsion coefficients : ");
     ROS_INFO("[%f, %f, %f, %f, %f]", cam_msg->D[0], cam_msg->D[1], cam_msg->D[2], cam_msg->D[3], cam_msg->D[4]);
-
-    for (int i = 0; i < 5; i++)
-        distCoeffs.push_back(D[i]);
 
     /* Get aruco pose in world frame */
     // aruco_id0
     tf::TransformListener arucos_listener;
     tf::StampedTransform transform;
-    arucos_listener.waitForTransform("world", "aruco_id0", ros::Time(0), ros::Duration(3.0));
-    arucos_listener.lookupTransform("world", "aruco_id0", ros::Time(0), transform);
+    arucos_listener.waitForTransform("odom", "aruco_id0", ros::Time::now(), ros::Duration(3.0));
+    arucos_listener.lookupTransform("odom", "aruco_id0", ros::Time::now(), transform);
     ar0_pose->position.x = (float)transform.getOrigin().x();
     ar0_pose->position.y = (float)transform.getOrigin().y();
     ar0_pose->position.z = (float)transform.getOrigin().z();
     tf::quaternionTFToMsg(transform.getRotation(), ar0_pose->orientation);
+
     // aruco_id1
-    arucos_listener.waitForTransform("world", "aruco_id1", ros::Time(0), ros::Duration(3.0));
-    arucos_listener.lookupTransform("world", "aruco_id1", ros::Time(0), transform);
+    arucos_listener.waitForTransform("odom", "aruco_id1", ros::Time(0), ros::Duration(3.0));
+    arucos_listener.lookupTransform("odom", "aruco_id1", ros::Time(0), transform);
     ar1_pose->position.x = (float)transform.getOrigin().x();
     ar1_pose->position.y = (float)transform.getOrigin().y();
     ar1_pose->position.z = (float)transform.getOrigin().z();
     tf::quaternionTFToMsg(transform.getRotation(), ar1_pose->orientation);
 
-    ros::Subscriber img_rect_sub = nh.subscribe("/csi_cam_0/image_raw", 10, imageCallback);
+    std::string image_name_str = CAMERA_NAME + std::string("/image_raw");
+    ros::Subscriber img_rect_sub = nh.subscribe(image_name_str, 10, imageCallback);
 
     ros::spin();
 }
@@ -164,13 +188,13 @@ void imageCallback(const sensor_msgs::Image& msg)
                     arucoCoord[0] = ar1_pose->position.x; arucoCoord[1] = ar1_pose->position.y; arucoCoord[2] = ar1_pose->position.z;
                     break;
                 default:
-                    ROS_INFO("Unknown pose for Aruco ID %i", (int)ids[i]); 
+                    ROS_WARN("Unknown pose for Aruco ID %i", (int)ids[i]); 
             }
             cv::Mat arucoCoordVector(4, 1, CV_64F, arucoCoord);
             cv::Mat arucoCoordVectorWorldFrame(4, 1, CV_64F);
             arucoCoordVectorWorldFrame = extrinsicMatrix*arucoCoordVector;
 
-#ifdef DEBUG
+#ifdef DEBUG_0
             std::cout << "***** ID " << (int)ids[i] << " *****" << std::endl;
             std::cout << "extrinsicMatrix" << std::endl;
             std::cout << extrinsicMatrix << std::endl;
